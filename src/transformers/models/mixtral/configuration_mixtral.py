@@ -91,6 +91,8 @@ class MixtralConfig(PretrainedConfig):
         output_router_logits (`bool`, *optional*, defaults to `False`):
             Whether or not the router logits should be returned by the model. Enabeling this will also
             allow the model to output the auxiliary loss. See [here]() for more details
+        router_z_loss_coef (`float`, *optional*, defaults to 0.001):
+            The z loss factor for the total loss.
         router_aux_loss_coef (`float`, *optional*, defaults to 0.001):
             The aux loss factor for the total loss.
 
@@ -133,6 +135,7 @@ class MixtralConfig(PretrainedConfig):
         num_experts_per_tok=2,
         num_local_experts=8,
         output_router_logits=False,
+        router_z_loss_coef=0.001,
         router_aux_loss_coef=0.001,
         **kwargs,
     ):
@@ -159,6 +162,7 @@ class MixtralConfig(PretrainedConfig):
         self.num_experts_per_tok = num_experts_per_tok
         self.num_local_experts = num_local_experts
         self.output_router_logits = output_router_logits
+        self.router_z_loss_coef = router_z_loss_coef
         self.router_aux_loss_coef = router_aux_loss_coef
         super().__init__(
             pad_token_id=pad_token_id,
