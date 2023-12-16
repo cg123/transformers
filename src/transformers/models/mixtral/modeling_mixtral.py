@@ -91,7 +91,7 @@ def router_z_loss_func(gate_logits: torch.Tensor) -> float:
         # tuple of layer gate logits
         # [(batch_size, sequence_len, num_experts)] x num_layers
         compute_device = gate_logits[0].device
-        gate_logits = torch.cat([gate.to(compute_device) for gate in gate_logits], dim=0)
+        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
         # -> [num_layers, batch_size, sequence_len, num_experts]
 
     num_layers, batch_size, sequence_length, _ = gate_logits.shape
@@ -124,7 +124,7 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
         # tuple of layer gate logits
         # [(batch_size, sequence_len, num_experts)] x num_layers
         compute_device = gate_logits[0].device
-        gate_logits = torch.cat([gate.to(compute_device) for gate in gate_logits], dim=0)
+        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
         # -> [num_layers, batch_size, sequence_len, num_experts]
 
     routing_weights, selected_experts = torch.topk(gate_logits, top_k, dim=-1)
