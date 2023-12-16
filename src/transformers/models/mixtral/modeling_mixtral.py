@@ -72,6 +72,33 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "MixtralConfig"
 
+def router_z_loss_func(gate_logits: torch.Tensor) -> float:
+    r"""
+    Compute the router z-loss implemented in PyTorch.
+
+    The router z-loss was introduced in [Designing Effective Sparse Expert Models](https://arxiv.org/abs/2202.08906).
+    It encourages router logits to remain small in an effort to improve stability.
+
+    Args:
+        router_logits (`float`):
+            Input logits of shape [num_layers, batch_size, sequence_length, num_experts]
+
+    Returns:
+        Scalar router z-loss.
+    """
+
+    if isinstance(gate_logits, tuple):
+        # tuple of layer gate logits
+        # [(batch_size, sequence_len, num_experts)] x num_layers
+        compute_device = gate_logits[0].device
+        gate_logits = torch.cat([gate.to(compute_device) for gate in gate_logits], dim=0)
+        # -> [num_layers, batch_size, sequence_len, num_experts]
+
+    num_layers, batch_size, sequence_length, _ = gate_logits.shape
+    log_z = torch.logsumexp(gate_logits, dim=-1)
+    z_loss = log_z**2
+    return torch.sum(z_loss) / (num_layers * batch_size * sequence_length)
+
 
 def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tensor = None, top_k=2) -> float:
     r"""
@@ -94,31 +121,21 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
         return 0
 
     if isinstance(gate_logits, tuple):
-        # cat along the layers?
+        # tuple of layer gate logits
+        # [(batch_size, sequence_len, num_experts)] x num_layers
         compute_device = gate_logits[0].device
         gate_logits = torch.cat([gate.to(compute_device) for gate in gate_logits], dim=0)
+        # -> [num_layers, batch_size, sequence_len, num_experts]
 
     routing_weights, selected_experts = torch.topk(gate_logits, top_k, dim=-1)
-    routing_weights = routing_weights.softmax(dim=-1)
+    routing_weights = routing_weights.softmax(dim=-1) # [num_layers, batch_size, sequence_len, top_k]
+    expert_one_hot = torch.nn.functional.one_hot(selected_experts, num_experts)  # [num_layers, batch_size, sequence_len, top_k, num_experts]
 
-    # cast the expert indices to int64, otherwise one-hot encoding will fail
-    if selected_experts.dtype != torch.int64:
-        selected_experts = selected_experts.to(torch.int64)
+    expert_mask = torch.max(expert_one_hot, axis=-2).values  # [num_layers, batch_size, sequence_len, num_experts]
+    expert_token_frac = torch.mean(expert_mask.float(), axis=-2, keepdim=False)  # [num_layers, batch_size, top_k]
 
-    if len(selected_experts.shape) == 2:
-        selected_experts = selected_experts.unsqueeze(2)
-
-    expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts)
-
-    # For a given token, determine if it was routed to a given expert.
-    expert_mask = torch.max(expert_mask, axis=-2).values
-
-    # cast to float32 otherwise mean will fail
-    expert_mask = expert_mask.to(torch.float32)
-    tokens_per_group_and_expert = torch.mean(expert_mask, axis=-2)
-
-    router_prob_per_group_and_expert = torch.mean(routing_weights, axis=-1)
-    return torch.mean(tokens_per_group_and_expert * router_prob_per_group_and_expert.unsqueeze(-1)) * (num_experts**2)
+    expert_probs = torch.mean(routing_weights, axis=-2) # [num_layers, batch_size, top_k]
+    return torch.mean(expert_token_frac * expert_probs.unsqueeze(-1)) * (num_experts**2)
 
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
@@ -1142,6 +1159,7 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.router_aux_loss_coef = config.router_aux_loss_coef
+        self.router_z_loss_coef = config.router_z_loss_coef
         self.num_experts = config.num_local_experts
         self.num_experts_per_tok = config.num_experts_per_tok
         # Initialize weights and apply final processing
@@ -1254,8 +1272,9 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
             aux_loss = load_balancing_loss_func(
                 outputs.router_logits if return_dict else outputs[-1], self.num_experts, self.num_experts_per_tok
             )
+            z_loss = router_z_loss_func(outputs.router_logits if return_dict else outputs[-1])
             if labels is not None:
-                loss += self.router_aux_loss_coef * aux_loss
+                loss += self.router_aux_loss_coef * aux_loss + self.router_z_loss_coef * z_loss
 
         if not return_dict:
             output = (logits,) + outputs[1:]
