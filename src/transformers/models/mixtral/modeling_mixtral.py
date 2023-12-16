@@ -89,15 +89,15 @@ def router_z_loss_func(gate_logits: torch.Tensor) -> float:
 
     if isinstance(gate_logits, tuple):
         # tuple of layer gate logits
-        # [(batch_size, sequence_len, num_experts)] x num_layers
+        # [(batch_size * sequence_len, num_experts)] x num_layers
         compute_device = gate_logits[0].device
         gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
-        # -> [num_layers, batch_size, sequence_len, num_experts]
+        # -> [num_layers, batch_size * sequence_len, num_experts]
 
-    num_layers, batch_size, sequence_length, _ = gate_logits.shape
+    num_layers, num_tokens, _ = gate_logits.shape
     log_z = torch.logsumexp(gate_logits, dim=-1)
     z_loss = log_z**2
-    return torch.sum(z_loss) / (num_layers * batch_size * sequence_length)
+    return torch.sum(z_loss) / (num_layers * num_tokens)
 
 
 def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tensor = None, top_k=2) -> float:
@@ -110,7 +110,7 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
 
     Args:
         gate_logits (Union[`torch.Tensor`, Tuple[torch.Tensor]):
-            Logits from the `gate`, should be a tuple of tensors. Shape: [batch_size, seqeunce_length, num_experts].
+            Logits from the `gate`, should be a tuple of tensors. Shape: [num_tokens, num_experts].
         num_experts (`int`, *optional*):
             Number of experts
 
@@ -122,20 +122,22 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
 
     if isinstance(gate_logits, tuple):
         # tuple of layer gate logits
-        # [(batch_size, sequence_len, num_experts)] x num_layers
+        # [(num_tokens, num_experts)] x num_layers
         compute_device = gate_logits[0].device
         gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
-        # -> [num_layers, batch_size, sequence_len, num_experts]
+        # -> [num_layers, num_tokens, num_experts]
 
     routing_weights, selected_experts = torch.topk(gate_logits, top_k, dim=-1)
-    routing_weights = routing_weights.softmax(dim=-1) # [num_layers, batch_size, sequence_len, top_k]
-    expert_one_hot = torch.nn.functional.one_hot(selected_experts, num_experts)  # [num_layers, batch_size, sequence_len, top_k, num_experts]
+    routing_weights = routing_weights.softmax(dim=-1) # [num_layers, num_tokens, top_k]
+    expert_one_hot = torch.nn.functional.one_hot(selected_experts, num_experts)  # [num_layers, num_tokens, top_k, num_experts]
 
-    expert_mask = torch.max(expert_one_hot, axis=-2).values  # [num_layers, batch_size, sequence_len, num_experts]
-    expert_token_frac = torch.mean(expert_mask.float(), axis=-2, keepdim=False)  # [num_layers, batch_size, top_k]
+    expert_mask = torch.max(expert_one_hot, axis=-2).values  # [num_layers, num_tokens, num_experts]
+    expert_token_frac = torch.mean(expert_mask.float(), axis=-2, keepdim=False)  # [num_layers, num_experts]
 
-    expert_probs = torch.mean(routing_weights, axis=-2) # [num_layers, batch_size, top_k]
-    return torch.mean(expert_token_frac * expert_probs.unsqueeze(-1)) * (num_experts**2)
+    all_routing_weights = torch.zeros_like(gate_logits, dtype=routing_weights.dtype)
+    all_routing_weights.scatter_(-1, selected_experts, routing_weights)  # [num_layers, num_tokens, num_experts]
+    expert_probs = torch.mean(all_routing_weights, axis=-2) # [num_layers, num_experts]
+    return torch.mean(expert_token_frac * expert_probs) * (num_experts**2)
 
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
