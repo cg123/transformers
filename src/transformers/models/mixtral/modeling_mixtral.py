@@ -36,8 +36,8 @@ from ...modeling_attn_mask_utils import (
     _prepare_4d_causal_attention_mask_for_sdpa,
 )
 from ...modeling_outputs import (
-    MoeCausalLMOutputWithPast,
-    MoeModelOutputWithPast,
+    MoECausalLMOutputWithPast,
+    MoEModelOutputWithPast,
     SequenceClassifierOutputWithPast,
 )
 from ...modeling_utils import PreTrainedModel
@@ -73,6 +73,7 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "MixtralConfig"
 
+
 def router_z_loss_func(gate_logits: torch.Tensor) -> float:
     r"""
     Compute the router z-loss implemented in PyTorch.
@@ -82,7 +83,8 @@ def router_z_loss_func(gate_logits: torch.Tensor) -> float:
 
     Args:
         router_logits (`float`):
-            Input logits of shape [num_layers, batch_size, sequence_length, num_experts]
+            Logits from the `gate`, should be a tuple of tensors. Shape: [num_tokens, num_experts].
+            Can also be a tensor of shape [num_tokens, num_layers, num_experts].
 
     Returns:
         Scalar router z-loss.
@@ -92,16 +94,16 @@ def router_z_loss_func(gate_logits: torch.Tensor) -> float:
         # tuple of layer gate logits
         # [(batch_size * sequence_len, num_experts)] x num_layers
         compute_device = gate_logits[0].device
-        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
-        # -> [num_layers, batch_size * sequence_len, num_experts]
+        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=1)
+        # -> [batch_size * sequence_len, num_layers, num_experts]
 
-    num_layers, num_tokens, _ = gate_logits.shape
+    num_tokens, num_layers, _ = gate_logits.shape
     log_z = torch.logsumexp(gate_logits, dim=-1)
     z_loss = log_z**2
     return torch.sum(z_loss) / (num_layers * num_tokens)
 
 
-def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tensor = None, top_k=2) -> float:
+def load_balancing_loss_func(gate_logits: torch.Tensor, top_k: int = 2) -> float:
     r"""
     Computes auxiliary load balancing loss as in Switch Transformer - implemented in Pytorch.
 
@@ -112,8 +114,7 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
     Args:
         gate_logits (Union[`torch.Tensor`, Tuple[torch.Tensor]):
             Logits from the `gate`, should be a tuple of tensors. Shape: [num_tokens, num_experts].
-        num_experts (`int`, *optional*):
-            Number of experts
+            Can also be a tensor of shape [num_tokens, num_layers, num_experts].
 
     Returns:
         The auxiliary loss.
@@ -125,20 +126,26 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, num_experts: torch.Tenso
         # tuple of layer gate logits
         # [(num_tokens, num_experts)] x num_layers
         compute_device = gate_logits[0].device
-        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=0)
-        # -> [num_layers, num_tokens, num_experts]
+        gate_logits = torch.stack([gate.to(compute_device) for gate in gate_logits], dim=1)
 
-    routing_weights, selected_experts = torch.topk(gate_logits, top_k, dim=-1)
-    routing_weights = routing_weights.softmax(dim=-1) # [num_layers, num_tokens, top_k]
-    expert_one_hot = torch.nn.functional.one_hot(selected_experts, num_experts)  # [num_layers, num_tokens, top_k, num_experts]
+    # gate_logits: [num_tokens, num_layers, num_experts]
+    num_tokens, num_layers, num_experts = gate_logits.shape
 
-    expert_mask = torch.max(expert_one_hot, axis=-2).values  # [num_layers, num_tokens, num_experts]
-    expert_token_frac = torch.mean(expert_mask.float(), axis=-2, keepdim=False)  # [num_layers, num_experts]
+    scores = gate_logits.softmax(dim=-1)
+    _, expert_indices = torch.topk(scores, top_k, dim=-1)  # [num_tokens, num_layers, top_k]
 
-    all_routing_weights = torch.zeros_like(gate_logits, dtype=routing_weights.dtype)
-    all_routing_weights.scatter_(-1, selected_experts, routing_weights)  # [num_layers, num_tokens, num_experts]
-    expert_probs = torch.mean(all_routing_weights, axis=-2) # [num_layers, num_experts]
-    return torch.mean(expert_token_frac * expert_probs) * (num_experts**2)
+    expert_one_hot = torch.nn.functional.one_hot(
+        expert_indices, num_experts
+    )  # [num_tokens, num_layers, top_k, num_experts]
+    expert_mask = torch.max(expert_one_hot, axis=-2).values  # [num_tokens, num_layers, num_experts]
+
+    tokens_per_expert = torch.mean(expert_mask.float(), axis=0, keepdim=False)  # [num_layers, num_experts]
+    expert_probs = scores.mean(dim=0).float()  # [num_layers, num_experts]
+
+    scale_numerator = num_experts
+    scale_denominator = num_layers * top_k
+    scale = scale_numerator / scale_denominator
+    return torch.dot(expert_probs.view(-1), tokens_per_expert.view(-1)) * scale
 
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
@@ -1104,7 +1111,7 @@ class MixtralModel(MixtralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, MoeModelOutputWithPast]:
+    ) -> Union[Tuple, MoEModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_router_logits = (
             output_router_logits if output_router_logits is not None else self.config.output_router_logits
@@ -1245,7 +1252,7 @@ class MixtralModel(MixtralPreTrainedModel):
                 for v in [hidden_states, next_cache, all_hidden_states, all_self_attns, all_router_logits]
                 if v is not None
             )
-        return MoeModelOutputWithPast(
+        return MoEModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
             hidden_states=all_hidden_states,
@@ -1288,7 +1295,7 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
         return self.model
 
     @add_start_docstrings_to_model_forward(MIXTRAL_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=MoeCausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
+    @replace_return_docstrings(output_type=MoECausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
     # Ignore copy
     def forward(
         self,
@@ -1303,7 +1310,7 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, MoeCausalLMOutputWithPast]:
+    ) -> Union[Tuple, MoECausalLMOutputWithPast]:
         r"""
         Args:
             labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1372,9 +1379,10 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
             loss = loss_fct(shift_logits, shift_labels)
 
         aux_loss = None
+        z_loss = None
         if output_router_logits:
             aux_loss = load_balancing_loss_func(
-                outputs.router_logits if return_dict else outputs[-1], self.num_experts, self.num_experts_per_tok
+                outputs.router_logits if return_dict else outputs[-1], self.num_experts_per_tok
             )
             z_loss = router_z_loss_func(outputs.router_logits if return_dict else outputs[-1])
             if labels is not None:
@@ -1386,9 +1394,10 @@ class MixtralForCausalLM(MixtralPreTrainedModel):
                 output = (aux_loss,) + output
             return (loss,) + output if loss is not None else output
 
-        return MoeCausalLMOutputWithPast(
+        return MoECausalLMOutputWithPast(
             loss=loss,
             aux_loss=aux_loss,
+            z_loss=z_loss,
             logits=logits,
             past_key_values=outputs.past_key_values,
             hidden_states=outputs.hidden_states,
