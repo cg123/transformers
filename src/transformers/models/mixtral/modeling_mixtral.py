@@ -142,7 +142,7 @@ def load_balancing_loss_func(gate_logits: torch.Tensor, top_k: int = 2) -> float
     expert_probs = scores.mean(dim=0).float()  # [num_layers, num_experts]
 
     scale_numerator = num_experts
-    scale_denominator = num_layers * num_tokens * top_k
+    scale_denominator = num_layers * top_k
     scale = scale_numerator / scale_denominator
     return torch.dot(expert_probs.view(-1), tokens_per_expert.view(-1)) * scale
 
