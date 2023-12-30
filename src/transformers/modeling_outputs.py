@@ -331,9 +331,13 @@ class MoECausalLMOutputWithPast(ModelOutput):
     past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
-    z_loss: torch.FloatTensor = None
-    aux_loss: torch.FloatTensor = None
+    z_loss: Optional[torch.FloatTensor] = None
+    aux_loss: Optional[torch.FloatTensor] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
+
+
+# Temporary hack for axolotl monkeypatch compatibility
+MoeCausalLMOutputWithPast = MoECausalLMOutputWithPast
 
 
 @dataclass
