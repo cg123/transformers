@@ -336,10 +336,6 @@ class MoECausalLMOutputWithPast(ModelOutput):
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
 
 
-# Temporary hack for axolotl monkeypatch compatibility
-MoeCausalLMOutputWithPast = MoECausalLMOutputWithPast
-
-
 @dataclass
 class MoEModelOutput(ModelOutput):
     """
@@ -412,6 +408,10 @@ class MoEModelOutputWithPast(ModelOutput):
     hidden_states: Optional[Tuple[torch.FloatTensor]] = None
     attentions: Optional[Tuple[torch.FloatTensor]] = None
     router_logits: Optional[Tuple[torch.FloatTensor]] = None
+
+
+# Temporary hack for axolotl monkeypatch compatibility
+MoeModelOutputWithPast = MoEModelOutputWithPast
 
 
 @dataclass
