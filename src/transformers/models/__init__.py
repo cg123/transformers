@@ -173,6 +173,7 @@ from . import (
     nllb_moe,
     nougat,
     nystromformer,
+    odeformer,
     olmo,
     olmoe,
     omdet_turbo,
