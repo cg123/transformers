@@ -612,6 +612,7 @@ _import_structure = {
     "models.nllb_moe": ["NllbMoeConfig"],
     "models.nougat": ["NougatProcessor"],
     "models.nystromformer": ["NystromformerConfig"],
+    "models.odeformer": ["ODEFormerConfig"],
     "models.olmo": ["OlmoConfig"],
     "models.olmoe": ["OlmoeConfig"],
     "models.omdet_turbo": [
@@ -5571,6 +5572,9 @@ if TYPE_CHECKING:
     from .models.nystromformer import (
         NystromformerConfig,
     )
+    from .models.odeformer import (
+        ODEformerConfig,
+    )
     from .models.olmo import OlmoConfig
     from .models.olmoe import OlmoeConfig
     from .models.omdet_turbo import (
@@ -7566,6 +7570,13 @@ if TYPE_CHECKING:
             NystromformerForTokenClassification,
             NystromformerModel,
             NystromformerPreTrainedModel,
+        )
+        from .models.odeformer import (
+            ODEFormerForCausalLM,
+            ODEFormerForSequenceClassification,
+            ODEFormerForTokenClassification,
+            ODEFormerModel,
+            ODEFormerPreTrainedModel,
         )
         from .models.olmo import (
             OlmoForCausalLM,
