@@ -65,6 +65,7 @@ class ODEFormerMLP(nn.Module):
         self.hidden_size = config.hidden_size
         self.intermediate_size = config.intermediate_size
         self.max_iter = config.max_layer_iterations
+        self.tol = config.residual_threshold
         self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
         self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
         self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
