@@ -75,6 +75,7 @@ class ODEFormerMLP(nn.Module):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x0 = x
         dx_norms = []
         dt = 1.0 / self.max_iter
         for iter_count in range(self.max_iter):
@@ -94,7 +95,7 @@ class ODEFormerMLP(nn.Module):
             self.last_norm_loss = None
         self.last_iter_count = iter_count
 
-        return x
+        return x - x0
 
 
 class ODEFormerDecoderLayer(nn.Module):
