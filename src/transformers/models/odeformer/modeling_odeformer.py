@@ -71,7 +71,11 @@ class ODEFormerMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def _inner(self, x: torch.Tensor) -> torch.Tensor:
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        res = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        res_norm = torch.norm(res, dim=-1, keepdim=True)
+        clamped_norm = torch.tanh_(res_norm / 10) * 10
+        scale = clamped_norm / res_norm.clamp_min(1e-6)
+        return res * scale
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x0 = x
