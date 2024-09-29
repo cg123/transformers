@@ -655,7 +655,7 @@ class ODEFormerForCausalLM(ODEFormerPreTrainedModel, GenerationMixin):
 
             for layer in self.model.layers:
                 if hasattr(layer.mlp, "last_norm_loss") and layer.mlp.last_norm_loss is not None:
-                    loss += layer.mlp.last_norm_loss * self.config.norm_loss_weight
+                    loss += layer.mlp.last_norm_loss * self.config.norm_loss_weight / self.config.num_hidden_layers
 
         if not return_dict:
             output = (logits,) + outputs[1:]
