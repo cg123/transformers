@@ -87,7 +87,7 @@ class ODEFormerMLP(nn.Module):
 
         if self.training:
             dx_norms = torch.stack(dx_norms, dim=0)
-            weights = 1 - torch.exp(torch.arange(0, self.max_iter, device=dx_norms.device))
+            weights = 1 - torch.exp(-torch.arange(0, self.max_iter, device=dx_norms.device))
             weights = weights / weights.sum()
             self.last_norm_loss = torch.sum(weights * dx_norms)
         else:
