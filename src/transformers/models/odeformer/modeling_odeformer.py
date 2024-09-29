@@ -71,8 +71,7 @@ class ODEFormerMLP(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def _inner(self, x: torch.Tensor) -> torch.Tensor:
-        res = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        return torch.tanh(res / 4.0) * 4.0
+        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x0 = x
@@ -653,6 +652,10 @@ class ODEFormerForCausalLM(ODEFormerPreTrainedModel, GenerationMixin):
             # Enable model parallelism
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
+
+            for layer in self.model.layers:
+                if hasattr(layer.mlp, "last_norm_loss") and layer.mlp.last_norm_loss is not None:
+                    loss += layer.mlp.last_norm_loss * self.config.norm_loss_weight
 
         if not return_dict:
             output = (logits,) + outputs[1:]

@@ -37,7 +37,7 @@ class ODEFormerConfig(PretrainedConfig):
         vocab_size (`int`, *optional*, defaults to 128256):
             Vocabulary size of the LLaMA model. Defines the number of different tokens that can be represented by the
             `inputs_ids` passed when calling [`ODEFormerModel`]
-        hidden_size (`int`, *optional*, defaults to 4096):
+        hidden_size (`int`, *optional*, defaults to 2048):
             Dimension of the hidden representations.
         intermediate_size (`int`, *optional*, defaults to 8192):
             Dimension of the MLP representations.
@@ -59,6 +59,8 @@ class ODEFormerConfig(PretrainedConfig):
             The maximum number of times to call each layer per forward pass.
         residual_threshold (`float`, *optional*, defaults to 0.0):
             The threshold for the residual to stop layer iteration. Not applicable at training time.
+        norm_loss_weight (`float`, *optional*, defaults to 0.01):
+            The weight of the MLP residual norm loss.
         max_position_embeddings (`int`, *optional*, defaults to 8192):
             The maximum sequence length that this model might ever be used with.
         initializer_range (`float`, *optional*, defaults to 0.02):
@@ -143,7 +145,7 @@ class ODEFormerConfig(PretrainedConfig):
     def __init__(
         self,
         vocab_size=128256,
-        hidden_size=4096,
+        hidden_size=2048,
         intermediate_size=8192,
         num_hidden_layers=12,
         num_attention_heads=32,
@@ -151,6 +153,7 @@ class ODEFormerConfig(PretrainedConfig):
         hidden_act="silu",
         max_layer_iterations=16,
         residual_threshold=0.0,
+        norm_loss_weight=0.01,
         max_position_embeddings=8192,
         initializer_range=0.02,
         rms_norm_eps=1e-6,
@@ -175,6 +178,7 @@ class ODEFormerConfig(PretrainedConfig):
         self.num_attention_heads = num_attention_heads
         self.max_layer_iterations = max_layer_iterations
         self.residual_threshold = residual_threshold
+        self.norm_loss_weight = norm_loss_weight
 
         # for backward compatibility
         if num_key_value_heads is None:
