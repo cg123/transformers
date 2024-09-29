@@ -20,7 +20,6 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
-import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
@@ -635,6 +634,9 @@ class ODEFormerForCausalLM(ODEFormerPreTrainedModel, GenerationMixin):
         # Only compute necessary logits, and do not upcast them to float if we are not computing the loss
         # TODO: remove the float() operation in v4.46
         logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :]).float()
+
+        # clamp logits to avoid numerical issues
+        logits = torch.tanh(logits / 30.0) * 30.0
 
         loss = None
         if labels is not None:
