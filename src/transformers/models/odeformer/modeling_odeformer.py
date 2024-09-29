@@ -72,10 +72,7 @@ class ODEFormerMLP(nn.Module):
 
     def _inner(self, x: torch.Tensor) -> torch.Tensor:
         res = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-        res_norm = torch.norm(res, dim=-1, keepdim=True)
-        clamped_norm = torch.tanh_(res_norm / 10) * 10
-        scale = clamped_norm / res_norm.clamp_min(1e-6)
-        return res * scale
+        return torch.tanh(res / 4.0) * 4.0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x0 = x
